@@ -37,4 +37,7 @@ export const env = {
   get SQL_CONSOLE_ENABLED() {
     return process.env.SQL_CONSOLE_ENABLED ?? "false";
   },
+  get BOOTSTRAP_TOKEN() {
+    return process.env.BOOTSTRAP_TOKEN;
+  },
 };

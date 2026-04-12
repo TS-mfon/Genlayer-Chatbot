@@ -32,6 +32,7 @@ ADMIN_EMAIL=
 ADMIN_PASSWORD_HASH=
 DATABASE_URL=
 SQL_CONSOLE_ENABLED=false
+BOOTSTRAP_TOKEN=
 ```
 
 Generate `ADMIN_PASSWORD_HASH`:
@@ -57,4 +58,5 @@ Open:
 - `PUT|DELETE /api/admin/entries/:id`
 - `GET /api/admin/chats`
 - `POST /api/admin/sql` (requires `SQL_CONSOLE_ENABLED=true`)
+- `POST /api/bootstrap` (requires `x-bootstrap-token`, runs DB schema bootstrap)
 - `GET|POST /api/auth/[...nextauth]`
