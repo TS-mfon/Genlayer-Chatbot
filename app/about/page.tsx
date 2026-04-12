@@ -7,7 +7,7 @@ export default function AboutPage() {
         from admin-managed knowledge entries stored in the database.
       </p>
       <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
-        <li>Embedding model: Gemini text-embedding-004</li>
+        <li>Embedding model: Gemini gemini-embedding-001</li>
         <li>Answer model: Gemini 2.0 Flash</li>
         <li>Retrieval: pgvector + PostgreSQL full-text search</li>
         <li>Admin tools: CRUD management + secured SQL console</li>

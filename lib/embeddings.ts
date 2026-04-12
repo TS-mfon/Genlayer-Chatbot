@@ -11,7 +11,9 @@ function getGenAiClient() {
 }
 
 export async function generateEmbedding(text: string): Promise<number[]> {
-  const model = getGenAiClient().getGenerativeModel({ model: "text-embedding-004" });
+  const model = getGenAiClient().getGenerativeModel({
+    model: "gemini-embedding-001",
+  });
   const result = await model.embedContent(text);
   return result.embedding.values;
 }

@@ -7,7 +7,7 @@ CREATE TABLE IF NOT EXISTS knowledge_entries (
   content TEXT NOT NULL,
   category TEXT,
   tags TEXT[] DEFAULT ARRAY[]::TEXT[],
-  embedding VECTOR(768),
+  embedding VECTOR(3072),
   source_url TEXT,
   is_active BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -52,7 +52,7 @@ FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
 CREATE OR REPLACE FUNCTION match_knowledge_entries(
-  query_embedding VECTOR(768),
+  query_embedding VECTOR(3072),
   match_threshold FLOAT,
   match_count INT,
   query_text TEXT DEFAULT ''
