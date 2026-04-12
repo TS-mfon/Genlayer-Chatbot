@@ -18,6 +18,14 @@ export async function retrieveChunks(question: string, topK = 5) {
   });
 
   if (error) {
+    // If DB schema/migration isn't applied yet, allow chat to degrade gracefully.
+    if (
+      error.message.includes("match_knowledge_entries") ||
+      error.message.includes("schema cache") ||
+      error.message.includes("Could not find the table")
+    ) {
+      return [];
+    }
     throw new Error(error.message);
   }
 

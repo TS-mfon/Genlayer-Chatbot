@@ -24,35 +24,47 @@ export async function POST(request: Request) {
       : NO_CONTEXT_MESSAGE;
 
     let sessionId = payload.session_id ?? null;
-    if (!sessionId) {
-      const { data: session, error: sessionError } = await supabaseAdmin
-        .from("chat_sessions")
-        .insert({})
-        .select("id")
-        .single();
+    try {
+      if (!sessionId) {
+        const { data: session, error: sessionError } = await supabaseAdmin
+          .from("chat_sessions")
+          .insert({})
+          .select("id")
+          .single();
 
-      if (sessionError || !session) {
-        throw new Error(sessionError?.message ?? "Failed to create chat session");
+        if (sessionError || !session) {
+          throw new Error(sessionError?.message ?? "Failed to create chat session");
+        }
+
+        sessionId = session.id;
       }
 
-      sessionId = session.id;
+      const sourceIds = chunks.map((chunk) => chunk.id);
+      await supabaseAdmin.from("chat_messages").insert([
+        {
+          session_id: sessionId,
+          role: "user",
+          content: payload.question,
+          sources: [],
+        },
+        {
+          session_id: sessionId,
+          role: "assistant",
+          content: answer,
+          sources: sourceIds,
+        },
+      ]);
+    } catch (persistError) {
+      const message =
+        persistError instanceof Error ? persistError.message : "Persistence failed";
+      if (
+        !message.includes("schema cache") &&
+        !message.includes("Could not find the table")
+      ) {
+        throw persistError;
+      }
+      sessionId = null;
     }
-
-    const sourceIds = chunks.map((chunk) => chunk.id);
-    await supabaseAdmin.from("chat_messages").insert([
-      {
-        session_id: sessionId,
-        role: "user",
-        content: payload.question,
-        sources: [],
-      },
-      {
-        session_id: sessionId,
-        role: "assistant",
-        content: answer,
-        sources: sourceIds,
-      },
-    ]);
 
     return NextResponse.json({
       session_id: sessionId,
