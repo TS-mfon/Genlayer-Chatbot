@@ -3,6 +3,10 @@ import { z } from "zod";
 import { isAdminAuthorized } from "@/lib/admin";
 import { getSupabaseAdmin } from "@/lib/db";
 import { generateEmbedding } from "@/lib/embeddings";
+import {
+  ensureSchemaInitialized,
+  isMissingSchemaError,
+} from "@/lib/schema-bootstrap";
 
 const entrySchema = z.object({
   title: z.string().min(2),
@@ -32,6 +36,25 @@ export async function GET(request: Request) {
 
   const { data, error } = await query.limit(200);
   if (error) {
+    if (isMissingSchemaError(error.message)) {
+      try {
+        await ensureSchemaInitialized();
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "Database schema is not initialized. Set DATABASE_URL and run POST /api/bootstrap, then retry.",
+          },
+          { status: 400 },
+        );
+      }
+
+      const retry = await query.limit(200);
+      if (retry.error) {
+        return NextResponse.json({ error: retry.error.message }, { status: 400 });
+      }
+      return NextResponse.json({ entries: retry.data ?? [] });
+    }
     return NextResponse.json({ error: error.message }, { status: 400 });
   }
 
@@ -48,7 +71,7 @@ export async function POST(request: Request) {
     const input = entrySchema.parse(await request.json());
     const embedding = await generateEmbedding(`${input.title}\n\n${input.content}`);
 
-    const { data, error } = await supabaseAdmin
+    const insertQuery = supabaseAdmin
       .from("knowledge_entries")
       .insert({
         ...input,
@@ -56,6 +79,25 @@ export async function POST(request: Request) {
       })
       .select("*")
       .single();
+
+    let { data, error } = await insertQuery;
+
+    if (error && isMissingSchemaError(error.message)) {
+      try {
+        await ensureSchemaInitialized();
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "Database schema is not initialized. Set DATABASE_URL and run POST /api/bootstrap, then retry.",
+          },
+          { status: 400 },
+        );
+      }
+      const retry = await insertQuery;
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) throw new Error(error.message);
     return NextResponse.json({ entry: data }, { status: 201 });

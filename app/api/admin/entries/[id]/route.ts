@@ -4,6 +4,10 @@ import { isAdminAuthorized } from "@/lib/admin";
 import { generateEmbedding } from "@/lib/embeddings";
 import { getSupabaseAdmin } from "@/lib/db";
 import { Database } from "@/lib/database.types";
+import {
+  ensureSchemaInitialized,
+  isMissingSchemaError,
+} from "@/lib/schema-bootstrap";
 
 const updateSchema = z.object({
   title: z.string().min(2).optional(),
@@ -48,11 +52,33 @@ export async function PUT(
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const entriesTable = supabaseAdmin.from("knowledge_entries") as any;
-    const { data, error } = await entriesTable
+    let { data, error } = await entriesTable
       .update(payload)
       .eq("id", params.id)
       .select("*")
       .single();
+
+    if (error && isMissingSchemaError(error.message)) {
+      try {
+        await ensureSchemaInitialized();
+      } catch {
+        return NextResponse.json(
+          {
+            error:
+              "Database schema is not initialized. Set DATABASE_URL and run POST /api/bootstrap, then retry.",
+          },
+          { status: 400 },
+        );
+      }
+
+      const retry = await entriesTable
+        .update(payload)
+        .eq("id", params.id)
+        .select("*")
+        .single();
+      data = retry.data;
+      error = retry.error;
+    }
 
     if (error) throw new Error(error.message);
     return NextResponse.json({ entry: data });
@@ -74,9 +100,26 @@ export async function DELETE(
   const supabaseAdmin = getSupabaseAdmin();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const entriesTable = supabaseAdmin.from("knowledge_entries") as any;
-  const { error } = await entriesTable
+  let { error } = await entriesTable
     .update({ is_active: false })
     .eq("id", params.id);
+
+  if (error && isMissingSchemaError(error.message)) {
+    try {
+      await ensureSchemaInitialized();
+    } catch {
+      return NextResponse.json(
+        {
+          error:
+            "Database schema is not initialized. Set DATABASE_URL and run POST /api/bootstrap, then retry.",
+        },
+        { status: 400 },
+      );
+    }
+
+    const retry = await entriesTable.update({ is_active: false }).eq("id", params.id);
+    error = retry.error;
+  }
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 400 });
