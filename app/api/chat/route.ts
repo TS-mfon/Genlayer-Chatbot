@@ -11,17 +11,56 @@ const chatInputSchema = z.object({
 
 const NO_CONTEXT_MESSAGE =
   "I don't have that information in my knowledge base yet. You can check https://docs.genlayer.com or ask in the GenLayer Discord.";
+const QUOTA_MESSAGE =
+  "The assistant is temporarily rate-limited by Gemini quota. Please retry in about a minute.";
+const GENERIC_ERROR_MESSAGE =
+  "The assistant is temporarily unavailable. Please try again shortly.";
+
+function isQuotaError(message: string) {
+  return (
+    message.includes("429") ||
+    message.toLowerCase().includes("too many requests") ||
+    message.toLowerCase().includes("quota exceeded") ||
+    message.toLowerCase().includes("rate limit")
+  );
+}
 
 export async function POST(request: Request) {
   try {
     const payload = chatInputSchema.parse(await request.json());
 
-    const chunks = await retrieveChunks(payload.question, 5);
+    let chunks = [] as Awaited<ReturnType<typeof retrieveChunks>>;
+    try {
+      chunks = await retrieveChunks(payload.question, 5);
+    } catch (caught) {
+      const message =
+        caught instanceof Error ? caught.message : "Failed to retrieve context";
+      if (isQuotaError(message)) {
+        return NextResponse.json({
+          session_id: null,
+          answer: QUOTA_MESSAGE,
+          sources: [],
+        });
+      }
+      throw caught;
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
     const hasContext = chunks.length > 0;
-    const answer = hasContext
-      ? await generateAnswer(payload.question, chunks)
-      : NO_CONTEXT_MESSAGE;
+    let answer = NO_CONTEXT_MESSAGE;
+    if (hasContext) {
+      try {
+        answer = await generateAnswer(payload.question, chunks);
+      } catch (caught) {
+        const message =
+          caught instanceof Error ? caught.message : "Failed to generate answer";
+        if (isQuotaError(message)) {
+          answer = QUOTA_MESSAGE;
+        } else {
+          throw caught;
+        }
+      }
+    }
 
     let sessionId = payload.session_id ?? null;
     try {
@@ -78,6 +117,13 @@ export async function POST(request: Request) {
   } catch (caught) {
     const message =
       caught instanceof Error ? caught.message : "Failed to process chat request";
-    return NextResponse.json({ error: message }, { status: 400 });
+    if (isQuotaError(message)) {
+      return NextResponse.json({
+        session_id: null,
+        answer: QUOTA_MESSAGE,
+        sources: [],
+      });
+    }
+    return NextResponse.json({ error: GENERIC_ERROR_MESSAGE }, { status: 400 });
   }
 }
