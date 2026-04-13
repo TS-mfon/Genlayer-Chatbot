@@ -30,6 +30,7 @@ export async function POST(request: Request) {
     const payload = chatInputSchema.parse(await request.json());
 
     let chunks = [] as Awaited<ReturnType<typeof retrieveChunks>>;
+    let quotaLimited = false;
     try {
       chunks = await retrieveChunks(payload.question, 5);
     } catch (caught) {
@@ -55,6 +56,7 @@ export async function POST(request: Request) {
         const message =
           caught instanceof Error ? caught.message : "Failed to generate answer";
         if (isQuotaError(message)) {
+          quotaLimited = true;
           answer = QUOTA_MESSAGE;
         } else {
           throw caught;
@@ -78,7 +80,7 @@ export async function POST(request: Request) {
         sessionId = session.id;
       }
 
-      const sourceIds = chunks.map((chunk) => chunk.id);
+      const sourceIds = quotaLimited ? [] : chunks.map((chunk) => chunk.id);
       await supabaseAdmin.from("chat_messages").insert([
         {
           session_id: sessionId,
@@ -108,11 +110,13 @@ export async function POST(request: Request) {
     return NextResponse.json({
       session_id: sessionId,
       answer,
-      sources: chunks.map((chunk) => ({
-        id: chunk.id,
-        title: chunk.title,
-        category: chunk.category,
-      })),
+      sources: quotaLimited
+        ? []
+        : chunks.map((chunk) => ({
+            id: chunk.id,
+            title: chunk.title,
+            category: chunk.category,
+          })),
     });
   } catch (caught) {
     const message =

@@ -1,14 +1,12 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type ChatRole = "user" | "assistant";
 
-type ChatMessage = {
-  role: ChatRole;
-  content: string;
-  sources?: Array<{ id: string; title: string; category: string | null }>;
-};
+type Source = { id: string; title: string; category: string | null };
+type ChatMessage = { role: ChatRole; content: string; sources?: Source[] };
+type Suggestion = { title: string; category: string | null };
 
 const STARTER_QUESTIONS = [
   "What is GenVM?",
@@ -22,17 +20,35 @@ export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
+  const messagesRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const run = async () => {
+      const response = await fetch("/api/suggestions", { cache: "no-store" });
+      const data = await response.json();
+      setSuggestions(data.suggestions ?? []);
+    };
+    void run();
+  }, []);
+
+  useEffect(() => {
+    messagesRef.current?.scrollTo({
+      top: messagesRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [messages, isLoading]);
 
   const canSubmit = useMemo(
     () => question.trim().length > 0 && !isLoading,
     [question, isLoading],
   );
 
-  const handleQuestion = async (value: string) => {
+  const ask = async (value: string) => {
     if (!value.trim() || isLoading) return;
 
-    const nextUserMessage: ChatMessage = { role: "user", content: value.trim() };
-    setMessages((prev) => [...prev, nextUserMessage]);
+    const text = value.trim();
+    setMessages((prev) => [...prev, { role: "user", content: text }]);
     setQuestion("");
     setError(null);
     setIsLoading(true);
@@ -41,7 +57,7 @@ export default function Home() {
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: value.trim(), session_id: sessionId }),
+        body: JSON.stringify({ question: text, session_id: sessionId }),
       });
 
       const data = await response.json();
@@ -58,10 +74,8 @@ export default function Home() {
           sources: data.sources ?? [],
         },
       ]);
-    } catch (caught) {
-      const message =
-        caught instanceof Error ? caught.message : "An unknown error occurred.";
-      setError(message);
+    } catch {
+      setError("Chat request failed. Please try again.");
     } finally {
       setIsLoading(false);
     }
@@ -69,56 +83,94 @@ export default function Home() {
 
   const onSubmit = async (event: FormEvent) => {
     event.preventDefault();
-    await handleQuestion(question);
+    await ask(question);
   };
 
   return (
-    <section className="space-y-6">
-      <div className="rounded-xl border border-slate-800 bg-slate-900 p-5">
-        <h2 className="text-2xl font-semibold text-white">Ask about GenLayer</h2>
-        <p className="mt-2 text-sm text-slate-300">
-          This assistant only answers from its curated GenLayer knowledge base.
+    <section className="grid gap-6 lg:grid-cols-[0.9fr_1.4fr]">
+      <aside className="rounded-2xl border border-indigo-400/20 bg-gradient-to-b from-indigo-500/10 via-slate-900 to-slate-900 p-6 shadow-2xl shadow-indigo-950/30">
+        <p className="mb-2 inline-flex rounded-full border border-indigo-400/30 bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-200">
+          Closed-domain assistant
         </p>
-      </div>
+        <h2 className="text-3xl font-semibold leading-tight text-white">
+          Ask smart questions about GenLayer
+        </h2>
+        <p className="mt-3 text-sm text-slate-300">
+          Answers are grounded only in your curated knowledge base. No web
+          browsing, no hallucinations.
+        </p>
 
-      <div className="rounded-xl border border-slate-800 bg-slate-900 p-4">
-        <div className="mb-4 flex flex-wrap gap-2">
-          {STARTER_QUESTIONS.map((item) => (
-            <button
-              key={item}
-              type="button"
-              onClick={() => handleQuestion(item)}
-              className="rounded-full border border-slate-700 px-3 py-1 text-xs text-slate-200 hover:border-slate-500"
-              disabled={isLoading}
-            >
-              {item}
-            </button>
-          ))}
+        <div className="mt-6 space-y-2">
+          <p className="text-sm font-medium text-slate-100">Try asking:</p>
+          <div className="flex flex-wrap gap-2">
+            {STARTER_QUESTIONS.map((item) => (
+              <button
+                key={item}
+                type="button"
+                disabled={isLoading}
+                onClick={() => ask(item)}
+                className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs text-slate-200 transition hover:border-indigo-400 hover:text-white disabled:opacity-50"
+              >
+                {item}
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="max-h-[28rem] space-y-4 overflow-y-auto rounded-lg border border-slate-800 bg-slate-950 p-4">
+        <div className="mt-6">
+          <p className="mb-2 text-sm font-medium text-slate-100">
+            You can ask questions about:
+          </p>
+          <div className="flex max-h-64 flex-wrap gap-2 overflow-y-auto pr-1">
+            {suggestions.length ? (
+              suggestions.map((item, idx) => (
+                <button
+                  key={`${item.title}-${idx}`}
+                  type="button"
+                  onClick={() => ask(item.title)}
+                  className="group rounded-lg border border-indigo-300/20 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs text-indigo-100 transition hover:border-indigo-300/50 hover:bg-indigo-500/20"
+                  title={item.category ?? "General"}
+                >
+                  <span className="block truncate">{item.title}</span>
+                </button>
+              ))
+            ) : (
+              <span className="text-xs text-slate-400">
+                Add entries in admin to populate suggestions.
+              </span>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      <div className="rounded-2xl border border-slate-800 bg-slate-900/80 shadow-xl shadow-black/30 backdrop-blur">
+        <div
+          ref={messagesRef}
+          className="h-[32rem] space-y-4 overflow-y-auto border-b border-slate-800 p-5"
+        >
           {messages.length === 0 ? (
-            <p className="text-sm text-slate-400">
-              No messages yet. Ask your first GenLayer question.
-            </p>
+            <div className="rounded-xl border border-dashed border-slate-700 bg-slate-950/60 p-4 text-sm text-slate-400">
+              Start the conversation with a GenLayer question.
+            </div>
           ) : null}
+
           {messages.map((message, idx) => (
             <article
               key={`${message.role}-${idx}`}
-              className={`rounded-lg p-3 text-sm ${
+              className={`max-w-[90%] rounded-2xl p-4 text-sm leading-relaxed ${
                 message.role === "user"
-                  ? "ml-10 bg-indigo-600 text-white"
-                  : "mr-10 bg-slate-800 text-slate-100"
+                  ? "ml-auto bg-gradient-to-r from-indigo-500 to-violet-600 text-white"
+                  : "bg-slate-800 text-slate-100"
               }`}
             >
               <p className="whitespace-pre-wrap">{message.content}</p>
               {message.sources?.length ? (
-                <div className="mt-3 flex flex-wrap gap-2">
+                <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                   {message.sources.map((source) => (
                     <span
                       key={source.id}
-                      className="rounded-full border border-slate-600 px-2 py-0.5 text-xs text-slate-300"
-                      title={source.category ?? "Uncategorized"}
+                      className="rounded-full border border-slate-600 bg-slate-900 px-2.5 py-1 text-xs text-slate-200"
+                      title={source.category ?? "General"}
                     >
                       {source.title}
                     </span>
@@ -127,24 +179,32 @@ export default function Home() {
               ) : null}
             </article>
           ))}
+
+          {isLoading ? (
+            <div className="max-w-[90%] rounded-2xl bg-slate-800 p-4">
+              <div className="h-2.5 w-20 animate-pulse rounded-full bg-slate-600" />
+            </div>
+          ) : null}
         </div>
 
-        <form onSubmit={onSubmit} className="mt-4 flex gap-2">
-          <input
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Ask a GenLayer question..."
-            className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 outline-none focus:border-indigo-500"
-          />
-          <button
-            type="submit"
-            disabled={!canSubmit}
-            className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-indigo-900"
-          >
-            {isLoading ? "Thinking..." : "Send"}
-          </button>
+        <form onSubmit={onSubmit} className="space-y-3 p-4">
+          <div className="relative">
+            <input
+              value={question}
+              onChange={(event) => setQuestion(event.target.value)}
+              placeholder="Ask a GenLayer question..."
+              className="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 pr-28 text-sm text-slate-100 outline-none transition focus:border-indigo-400"
+            />
+            <button
+              type="submit"
+              disabled={!canSubmit}
+              className="absolute right-1.5 top-1.5 rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:bg-indigo-900"
+            >
+              {isLoading ? "Thinking..." : "Send"}
+            </button>
+          </div>
+          {error ? <p className="text-sm text-red-400">{error}</p> : null}
         </form>
-        {error ? <p className="mt-2 text-sm text-red-400">{error}</p> : null}
       </div>
     </section>
   );
