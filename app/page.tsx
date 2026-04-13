@@ -1,6 +1,8 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 type ChatRole = "user" | "assistant";
 
@@ -163,7 +165,39 @@ export default function Home() {
                   : "bg-slate-800 text-slate-100"
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              {message.role === "assistant" ? (
+                <div className="markdown-body">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      a: ({ ...props }) => (
+                        <a
+                          {...props}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-indigo-300 underline underline-offset-2 hover:text-indigo-200"
+                        />
+                      ),
+                      code: ({ children, className, ...props }) => (
+                        <code
+                          {...props}
+                          className={
+                            className
+                              ? className
+                              : "rounded bg-slate-900 px-1.5 py-0.5 text-xs text-indigo-200"
+                          }
+                        >
+                          {children}
+                        </code>
+                      ),
+                    }}
+                  >
+                    {message.content}
+                  </ReactMarkdown>
+                </div>
+              ) : (
+                <p className="whitespace-pre-wrap">{message.content}</p>
+              )}
               {message.sources?.length ? (
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                   {message.sources.map((source) => (
