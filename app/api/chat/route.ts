@@ -3,15 +3,6 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/db";
 import { composeExtractiveAnswer } from "@/lib/answer-composer";
 import { retrieveCandidates } from "@/lib/retrieval";
-import {
-  generateGroundedChatAnswer,
-  isGeminiRateLimitError,
-} from "@/lib/gemini";
-import {
-  generateGroundedChatAnswerOpenAI,
-  isOpenAiRateLimitError,
-} from "@/lib/openai";
-import { env } from "@/lib/env";
 
 const chatInputSchema = z.object({
   question: z.string().min(2),
@@ -26,34 +17,7 @@ export async function POST(request: Request) {
     const payload = chatInputSchema.parse(await request.json());
     const candidates = await retrieveCandidates(payload.question, 12);
     const composed = composeExtractiveAnswer(payload.question, candidates);
-    const sourceIds = new Set(composed.sources.map((source) => source.id));
-    const groundedCandidates = candidates.filter((candidate) => sourceIds.has(candidate.id));
-
-    let finalAnswer = composed.answer;
-    if (!composed.lowConfidence && groundedCandidates.length > 0) {
-      if (env.OPENAI_API_KEY) {
-        try {
-          finalAnswer = await generateGroundedChatAnswerOpenAI(
-            payload.question,
-            groundedCandidates,
-          );
-        } catch (caught) {
-          if (!isOpenAiRateLimitError(caught)) {
-            finalAnswer = composed.answer;
-          }
-        }
-      }
-
-      if (finalAnswer === composed.answer && env.GEMINI_API_KEY) {
-        try {
-          finalAnswer = await generateGroundedChatAnswer(payload.question, groundedCandidates);
-        } catch (caught) {
-          if (!isGeminiRateLimitError(caught)) {
-            finalAnswer = composed.answer;
-          }
-        }
-      }
-    }
+    const finalAnswer = composed.answer;
 
     const supabaseAdmin = getSupabaseAdmin();
 

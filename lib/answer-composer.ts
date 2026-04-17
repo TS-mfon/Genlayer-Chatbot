@@ -24,27 +24,6 @@ function normalizeKey(value: string) {
   return normalizeSpace(value).toLowerCase();
 }
 
-function ensureSentence(value: string) {
-  const trimmed = normalizeSpace(value);
-  if (!trimmed) return "";
-  if (/[.!?]$/.test(trimmed)) return trimmed;
-  return `${trimmed}.`;
-}
-
-function firstSentence(value: string) {
-  const normalized = normalizeSpace(value);
-  const [sentence] = normalized.split(/(?<=[.!?])\s+/);
-  return sentence ?? normalized;
-}
-
-function clampLength(value: string, maxLength: number) {
-  if (value.length <= maxLength) return value;
-  const slice = value.slice(0, maxLength);
-  const cut = slice.lastIndexOf(" ");
-  const safe = cut > 60 ? slice.slice(0, cut) : slice;
-  return `${safe.trim()}…`;
-}
-
 const STOP_WORDS = new Set([
   "what",
   "how",
@@ -72,22 +51,10 @@ type DirectAnswerResult = {
   usedCandidateIds: string[];
 };
 
-type KeyPoint = {
-  text: string;
-  candidateId: string;
-};
-
 function tokenize(value: string) {
   return normalizeKey(value)
     .split(/[^a-z0-9]+/)
     .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
-}
-
-function splitSentences(value: string) {
-  return normalizeSpace(value)
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
 }
 
 function termCoverage(text: string, terms: string[]) {
@@ -139,7 +106,7 @@ function pickFocusedCandidates(question: string, candidates: RetrievalCandidate[
 }
 
 function composeDirectAnswer(
-  question: string,
+  _question: string,
   candidates: RetrievalCandidate[],
 ): DirectAnswerResult {
   if (!candidates.length) {
@@ -150,48 +117,11 @@ function composeDirectAnswer(
   }
 
   const top = candidates[0];
-  const terms = tokenize(question);
-  const sentences = splitSentences(top.content);
-  if (!sentences.length) {
-    return {
-      text: ensureSentence(clampLength(firstSentence(top.snippet), 420)),
-      usedCandidateIds: [top.id],
-    };
-  }
-
-  const rankedSentences = sentences
-    .map((sentence) => ({ sentence, score: termCoverage(sentence, terms) }))
-    .sort((left, right) => right.score - left.score);
-  const selected = rankedSentences
-    .slice(0, 2)
-    .map((item) => ensureSentence(item.sentence))
-    .filter(Boolean);
-  const text = clampLength(selected.join(" "), 420);
+  const text = top.content.trim() || top.snippet.trim() || LOW_CONFIDENCE_FALLBACK;
   return {
     text: text || LOW_CONFIDENCE_FALLBACK,
     usedCandidateIds: [top.id],
   };
-}
-
-function composeKeyPoints(candidates: RetrievalCandidate[]) {
-  const points: KeyPoint[] = [];
-  const seen = new Set<string>();
-
-  for (const candidate of candidates) {
-    if (points.length >= 3) break;
-
-    const sentence = ensureSentence(clampLength(firstSentence(candidate.snippet), 180));
-    const normalized = normalizeKey(sentence);
-    if (!sentence || seen.has(normalized)) continue;
-
-    points.push({
-      text: sentence,
-      candidateId: candidate.id,
-    });
-    seen.add(normalized);
-  }
-
-  return points;
 }
 
 function pickSources(candidates: RetrievalCandidate[], usedCandidateIds: string[]) {
@@ -293,28 +223,29 @@ export function composeExtractiveAnswer(
   }
 
   const directAnswer = composeDirectAnswer(question, focusedCandidates);
-  const keyPoints = composeKeyPoints(focusedCandidates);
-  const usedCandidateIds = Array.from(
-    new Set([
-      ...directAnswer.usedCandidateIds,
-      ...keyPoints.map((point) => point.candidateId),
-    ]),
-  );
+  const usedCandidateIds = focusedCandidates.slice(0, 3).map((item) => item.id);
   const sources = pickSources(focusedCandidates, usedCandidateIds);
 
   const sourceLines = sources.length
     ? sources.map((source) => `${source.title}${source.category ? ` (${source.category})` : ""}`)
     : ["none"];
-
-  const detailsBlock = keyPoints.length
-    ? keyPoints.map((point) => `- ${point.text}`).join("\n")
-    : "- No strong additional details were found in the matched entries.";
+  const additionalContext = focusedCandidates
+    .slice(1, 3)
+    .map((candidate) => {
+      const content = candidate.content.trim();
+      if (!content) return "";
+      return [
+        "",
+        `Additional context from "${candidate.title}":`,
+        content,
+      ].join("\n");
+    })
+    .filter(Boolean)
+    .join("\n\n");
 
   const answer = [
     directAnswer.text,
-    "",
-    "Here are the most relevant details from the knowledge base:",
-    detailsBlock,
+    additionalContext ? `\n\n${additionalContext}` : "",
     "",
     `Sources used: ${sourceLines.join("; ")}`,
   ].join("\n");
