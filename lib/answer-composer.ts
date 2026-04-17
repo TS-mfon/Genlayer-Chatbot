@@ -194,7 +194,7 @@ function isLowConfidence(candidates: RetrievalCandidate[]) {
   const scoreSignal = top.score * 0.7 + avgTop3 * 0.3;
   const weakTermSignal = top.termHits < 1;
 
-  return scoreSignal < 0.18 || (weakTermSignal && scoreSignal < 0.26);
+  return scoreSignal < 0.14 || (weakTermSignal && scoreSignal < 0.21);
 }
 
 export function composeExtractiveAnswer(

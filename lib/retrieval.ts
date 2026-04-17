@@ -167,10 +167,19 @@ function rankCandidate(
   question: string,
   terms: string[],
 ): RetrievalCandidate {
+  const normalizedQuestion = normalizeText(question);
+  const normalizedTitle = normalizeText(row.title);
   const tags = row.tags ?? [];
   const snippet = selectSnippet(row.content, terms);
   const titleHits = countTermHits(row.title, terms);
   const contentHits = countTermHits(snippet || row.content.slice(0, 400), terms);
+  const titleCoverage = terms.length
+    ? terms.filter((term) => normalizedTitle.includes(term)).length / terms.length
+    : 0;
+  const phraseMatch =
+    normalizedQuestion.length >= 4 &&
+    (normalizedTitle.includes(normalizedQuestion) ||
+      normalizedQuestion.includes(normalizedTitle));
 
   const categoryHits = row.category ? Number(hasTermOverlap(row.category, terms)) : 0;
   const tagHits = tags.reduce(
@@ -185,13 +194,22 @@ function rankCandidate(
   );
   const baseScore = Math.max(row.text_rank, 0) * 0.65 + Math.max(row.fuzzy_score, 0) * 0.35;
   const titleBoost = Math.min(titleHits, 3) * 0.08;
+  const titleCoverageBoost = Math.min(titleCoverage, 1) * 0.2;
+  const titlePhraseBoost = phraseMatch ? 0.22 : 0;
   const contentBoost = Math.min(contentHits, 6) * 0.03;
   const categoryTagBoost = Math.min(tagCategoryHits, 3) * 0.05;
   const snippetPenalty = snippet.length > 210 ? 0.02 : 0;
 
   const score = Math.max(
     0,
-    baseScore + titleBoost + contentBoost + categoryTagBoost + synonymBoost - snippetPenalty,
+    baseScore +
+      titleBoost +
+      titleCoverageBoost +
+      titlePhraseBoost +
+      contentBoost +
+      categoryTagBoost +
+      synonymBoost -
+      snippetPenalty,
   );
 
   return {
@@ -218,36 +236,80 @@ export async function retrieveCandidates(question: string, topK = 12) {
   const terms = buildExpandedTerms(normalizedQuestion);
   const matchCount = Math.max(1, Math.min(topK, 12));
 
-  const runQuery = async () =>
+  const runRpcQuery = async () =>
     supabaseAdmin.rpc("search_knowledge_entries_extractive", {
       query_text: normalizedQuestion,
       match_count: matchCount,
     });
 
-  let { data, error } = await runQuery();
+  const runTableFallbackQuery = async () => {
+    const fallbackTerms = terms.slice(0, 6);
+    const normalizedPhrase = normalizeText(normalizedQuestion)
+      .replace(/[^a-z0-9\s]/g, " ")
+      .trim();
+    const clauses: string[] = [];
+
+    if (normalizedPhrase.length >= 3) {
+      clauses.push(`title.ilike.%${normalizedPhrase}%`);
+      clauses.push(`content.ilike.%${normalizedPhrase}%`);
+    }
+    for (const term of fallbackTerms) {
+      clauses.push(`title.ilike.%${term}%`);
+      clauses.push(`content.ilike.%${term}%`);
+    }
+
+    if (!clauses.length) return [] as SearchRow[];
+
+    const { data, error } = await supabaseAdmin
+      .from("knowledge_entries")
+      .select("id,title,content,category,tags,updated_at")
+      .eq("is_active", true)
+      .or(clauses.join(","))
+      .order("updated_at", { ascending: false })
+      .limit(Math.max(matchCount * 3, 18));
+
+    if (error) {
+      if (isMissingSchemaError(error.message)) {
+        return [] as SearchRow[];
+      }
+      throw new Error(error.message);
+    }
+
+    return ((data ?? []) as Omit<SearchRow, "text_rank" | "fuzzy_score">[]).map((row) => ({
+      ...row,
+      text_rank: 0,
+      fuzzy_score: 0,
+    }));
+  };
+
+  let { data, error } = await runRpcQuery();
 
   if (error && isMissingSchemaError(error.message)) {
     try {
       await ensureSchemaInitialized();
-      const retry = await runQuery();
+      const retry = await runRpcQuery();
       data = retry.data;
       error = retry.error;
     } catch {
-      return [];
+      data = null;
+      error = null;
     }
+  }
+
+  if (error && error.message.includes("search_knowledge_entries_extractive")) {
+    data = null;
+    error = null;
   }
 
   if (error) {
-    if (
-      error.message.includes("search_knowledge_entries_extractive") ||
-      isMissingSchemaError(error.message)
-    ) {
-      return [];
-    }
     throw new Error(error.message);
   }
 
-  const rows = (data ?? []) as SearchRow[];
+  let rows = (data ?? []) as SearchRow[];
+  if (!rows.length) {
+    rows = await runTableFallbackQuery();
+  }
+
   return rows
     .map((row) => rankCandidate(row, normalizedQuestion, terms))
     .sort((left, right) => {
