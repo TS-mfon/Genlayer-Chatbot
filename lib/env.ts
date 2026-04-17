@@ -22,6 +22,9 @@ export const env = {
   get GEMINI_API_KEY() {
     return process.env.GEMINI_API_KEY ?? null;
   },
+  get OPENAI_API_KEY() {
+    return process.env.OPENAI_API_KEY ?? null;
+  },
   get NEXTAUTH_SECRET() {
     return requireEnv("NEXTAUTH_SECRET");
   },

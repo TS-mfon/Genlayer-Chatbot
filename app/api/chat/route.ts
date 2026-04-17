@@ -7,6 +7,10 @@ import {
   generateGroundedChatAnswer,
   isGeminiRateLimitError,
 } from "@/lib/gemini";
+import {
+  generateGroundedChatAnswerOpenAI,
+  isOpenAiRateLimitError,
+} from "@/lib/openai";
 import { env } from "@/lib/env";
 
 const chatInputSchema = z.object({
@@ -26,12 +30,27 @@ export async function POST(request: Request) {
     const groundedCandidates = candidates.filter((candidate) => sourceIds.has(candidate.id));
 
     let finalAnswer = composed.answer;
-    if (!composed.lowConfidence && env.GEMINI_API_KEY && groundedCandidates.length > 0) {
-      try {
-        finalAnswer = await generateGroundedChatAnswer(payload.question, groundedCandidates);
-      } catch (caught) {
-        if (!isGeminiRateLimitError(caught)) {
-          finalAnswer = composed.answer;
+    if (!composed.lowConfidence && groundedCandidates.length > 0) {
+      if (env.OPENAI_API_KEY) {
+        try {
+          finalAnswer = await generateGroundedChatAnswerOpenAI(
+            payload.question,
+            groundedCandidates,
+          );
+        } catch (caught) {
+          if (!isOpenAiRateLimitError(caught)) {
+            finalAnswer = composed.answer;
+          }
+        }
+      }
+
+      if (finalAnswer === composed.answer && env.GEMINI_API_KEY) {
+        try {
+          finalAnswer = await generateGroundedChatAnswer(payload.question, groundedCandidates);
+        } catch (caught) {
+          if (!isGeminiRateLimitError(caught)) {
+            finalAnswer = composed.answer;
+          }
         }
       }
     }
