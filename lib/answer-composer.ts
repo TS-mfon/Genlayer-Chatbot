@@ -276,15 +276,12 @@ export function composeExtractiveAnswer(
   if (lowConfidence) {
     const relatedTitles = pickRelatedTitles(question, candidates);
     const answer = [
-      "## Direct answer",
       LOW_CONFIDENCE_FALLBACK,
       "",
-      "## Key points",
-      "- I found related entries, but the match quality was only moderate.",
-      "- Try one of the related questions below for a closer match.",
+      "I found related entries, but the match quality for your exact question was only moderate.",
+      "Try one of the related questions below for a closer, more complete answer.",
       "",
-      "## Sources",
-      "- None",
+      "Sources used: none",
     ].join("\n");
 
     return {
@@ -306,20 +303,20 @@ export function composeExtractiveAnswer(
   const sources = pickSources(focusedCandidates, usedCandidateIds);
 
   const sourceLines = sources.length
-    ? sources.map((source) => `- ${source.title}${source.category ? ` (${source.category})` : ""}`)
-    : ["- None"];
+    ? sources.map((source) => `${source.title}${source.category ? ` (${source.category})` : ""}`)
+    : ["none"];
+
+  const detailsBlock = keyPoints.length
+    ? keyPoints.map((point) => `- ${point.text}`).join("\n")
+    : "- No strong additional details were found in the matched entries.";
 
   const answer = [
-    "## Direct answer",
     directAnswer.text,
     "",
-    "## Key points",
-    ...(keyPoints.length
-      ? keyPoints.map((point) => `- ${point.text}`)
-      : ["- No strong key points available."]),
+    "Here are the most relevant details from the knowledge base:",
+    detailsBlock,
     "",
-    "## Sources",
-    ...sourceLines,
+    `Sources used: ${sourceLines.join("; ")}`,
   ].join("\n");
 
   return {
