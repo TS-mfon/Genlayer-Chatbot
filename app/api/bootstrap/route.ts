@@ -17,13 +17,16 @@ export async function POST(request: Request) {
     const sql = getSqlClient();
     await sql.unsafe(BOOTSTRAP_SQL);
     const tableRows = await sql`select to_regclass('public.knowledge_entries') as table_name`;
-    const fnRows =
+    const legacyFnRows =
       await sql`select to_regprocedure('public.match_knowledge_entries(vector,double precision,integer,text)') as function_name`;
+    const extractiveFnRows =
+      await sql`select to_regprocedure('public.search_knowledge_entries_extractive(text,integer)') as function_name`;
 
     return NextResponse.json({
       success: true,
       table: tableRows[0]?.table_name ?? null,
-      function: fnRows[0]?.function_name ?? null,
+      legacy_function: legacyFnRows[0]?.function_name ?? null,
+      extractive_function: extractiveFnRows[0]?.function_name ?? null,
     });
   } catch (caught) {
     const message =

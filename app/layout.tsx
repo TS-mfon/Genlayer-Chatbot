@@ -17,7 +17,7 @@ const geistMono = localFont({
 
 export const metadata: Metadata = {
   title: "GenLayer Knowledge Assistant",
-  description: "Closed-domain GenLayer chatbot powered by Gemini and Supabase",
+  description: "Closed-domain GenLayer chatbot powered by extractive retrieval and Supabase",
 };
 
 export default function RootLayout({

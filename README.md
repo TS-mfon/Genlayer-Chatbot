@@ -1,8 +1,8 @@
 # GenLayer-Chatbot
 
 Closed-domain GenLayer chatbot with:
-- Gemini embeddings + answer generation
-- Supabase/PostgreSQL + pgvector retrieval
+- deterministic extractive retrieval (no LLM required for chat)
+- Supabase/PostgreSQL full-text + fuzzy ranking
 - Public chat UI with answer sources
 - Protected admin dashboard
 - Admin database management via CRUD and SQL console
@@ -18,7 +18,9 @@ Closed-domain GenLayer chatbot with:
    cp .env.example .env.local
    ```
 3. Fill `.env.local` values.
-4. Run database migration from `supabase/migrations/001_init.sql`.
+4. Run database migrations from:
+   - `supabase/migrations/001_init.sql`
+   - `supabase/migrations/002_extractive_search.sql`
 
 ## 2. Required Environment Variables
 
@@ -26,7 +28,6 @@ Closed-domain GenLayer chatbot with:
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
-GEMINI_API_KEY=
 NEXTAUTH_SECRET=
 ADMIN_EMAIL=
 ADMIN_PASSWORD_HASH=
@@ -54,6 +55,7 @@ Open:
 ## 4. API Surface
 
 - `POST /api/chat`
+- `GET /api/suggestions`
 - `GET|POST /api/admin/entries`
 - `PUT|DELETE /api/admin/entries/:id`
 - `GET /api/admin/chats`

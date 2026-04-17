@@ -7,14 +7,25 @@ import remarkGfm from "remark-gfm";
 type ChatRole = "user" | "assistant";
 
 type Source = { id: string; title: string; category: string | null };
-type ChatMessage = { role: ChatRole; content: string; sources?: Source[] };
 type Suggestion = { title: string; category: string | null };
+type RelatedTitle = { title: string; category: string | null };
+type ChatMessage = {
+  role: ChatRole;
+  content: string;
+  sources?: Source[];
+  lowConfidence?: boolean;
+  relatedTitles?: RelatedTitle[];
+};
 
 const STARTER_QUESTIONS = [
   "What is GenVM?",
   "How do validator nodes work in GenLayer?",
   "What is Optimistic Democracy in GenLayer?",
 ];
+
+function normalizeTitleKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+}
 
 export default function Home() {
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -45,6 +56,13 @@ export default function Home() {
     () => question.trim().length > 0 && !isLoading,
     [question, isLoading],
   );
+  const suggestionsByTitle = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const item of suggestions) {
+      map.set(normalizeTitleKey(item.title), item.category ?? null);
+    }
+    return map;
+  }, [suggestions]);
 
   const ask = async (value: string) => {
     if (!value.trim() || isLoading) return;
@@ -67,6 +85,22 @@ export default function Home() {
         throw new Error(data.error ?? "Failed to fetch response.");
       }
 
+      const lowConfidence = Boolean(data.low_confidence);
+      const relatedTitleValues: unknown[] = Array.isArray(data.related_titles)
+        ? data.related_titles
+        : [];
+      const relatedTitles: RelatedTitle[] = lowConfidence
+        ? relatedTitleValues
+            .filter((item): item is string => typeof item === "string")
+            .map((title) => title.trim())
+            .filter((title) => title.length > 0)
+            .slice(0, 3)
+            .map((title) => ({
+              title,
+              category: suggestionsByTitle.get(normalizeTitleKey(title)) ?? null,
+            }))
+        : [];
+
       setSessionId(data.session_id ?? sessionId);
       setMessages((prev) => [
         ...prev,
@@ -74,6 +108,8 @@ export default function Home() {
           role: "assistant",
           content: data.answer,
           sources: data.sources ?? [],
+          lowConfidence,
+          relatedTitles,
         },
       ]);
     } catch {
@@ -130,10 +166,15 @@ export default function Home() {
                   key={`${item.title}-${idx}`}
                   type="button"
                   onClick={() => ask(item.title)}
-                  className="group rounded-lg border border-indigo-300/20 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs text-indigo-100 transition hover:border-indigo-300/50 hover:bg-indigo-500/20"
+                  className="group inline-flex items-center gap-2 rounded-lg border border-indigo-300/20 bg-indigo-500/10 px-2.5 py-1.5 text-left text-xs text-indigo-100 transition hover:border-indigo-300/50 hover:bg-indigo-500/20"
                   title={item.category ?? "General"}
                 >
-                  <span className="block truncate">{item.title}</span>
+                  <span className="block max-w-[11rem] truncate">{item.title}</span>
+                  {item.category ? (
+                    <span className="rounded-full border border-indigo-200/20 bg-slate-900/60 px-1.5 py-0.5 text-[10px] text-indigo-200">
+                      {item.category}
+                    </span>
+                  ) : null}
                 </button>
               ))
             ) : (
@@ -166,34 +207,41 @@ export default function Home() {
               }`}
             >
               {message.role === "assistant" ? (
-                <div className="markdown-body">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={{
-                      a: ({ ...props }) => (
-                        <a
-                          {...props}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-indigo-300 underline underline-offset-2 hover:text-indigo-200"
-                        />
-                      ),
-                      code: ({ children, className, ...props }) => (
-                        <code
-                          {...props}
-                          className={
-                            className
-                              ? className
-                              : "rounded bg-slate-900 px-1.5 py-0.5 text-xs text-indigo-200"
-                          }
-                        >
-                          {children}
-                        </code>
-                      ),
-                    }}
-                  >
-                    {message.content}
-                  </ReactMarkdown>
+                <div>
+                  {message.lowConfidence ? (
+                    <p className="mb-2 inline-flex rounded-full border border-amber-300/30 bg-amber-500/10 px-2 py-1 text-[11px] font-medium text-amber-200">
+                      Best match only - verify with sources
+                    </p>
+                  ) : null}
+                  <div className="markdown-body">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={{
+                        a: ({ ...props }) => (
+                          <a
+                            {...props}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-indigo-300 underline underline-offset-2 hover:text-indigo-200"
+                          />
+                        ),
+                        code: ({ children, className, ...props }) => (
+                          <code
+                            {...props}
+                            className={
+                              className
+                                ? className
+                                : "rounded bg-slate-900 px-1.5 py-0.5 text-xs text-indigo-200"
+                            }
+                          >
+                            {children}
+                          </code>
+                        ),
+                      }}
+                    >
+                      {message.content}
+                    </ReactMarkdown>
+                  </div>
                 </div>
               ) : (
                 <p className="whitespace-pre-wrap">{message.content}</p>
@@ -209,6 +257,31 @@ export default function Home() {
                       {source.title}
                     </span>
                   ))}
+                </div>
+              ) : null}
+              {message.relatedTitles?.length ? (
+                <div className="mt-3 border-t border-slate-700/60 pt-3">
+                  <p className="mb-2 text-xs text-indigo-200/90">
+                    Try a related question:
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {message.relatedTitles.map((item, relatedIdx) => (
+                      <button
+                        key={`${item.title}-${relatedIdx}`}
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => ask(item.title)}
+                        className="inline-flex items-center gap-2 rounded-full border border-indigo-300/25 bg-indigo-500/10 px-3 py-1 text-xs text-indigo-100 transition hover:border-indigo-300/45 hover:bg-indigo-500/20 disabled:opacity-50"
+                      >
+                        <span>{item.title}</span>
+                        {item.category ? (
+                          <span className="rounded-full border border-indigo-200/20 bg-slate-900/60 px-1.5 py-0.5 text-[10px] text-indigo-200">
+                            {item.category}
+                          </span>
+                        ) : null}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               ) : null}
             </article>

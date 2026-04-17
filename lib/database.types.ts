@@ -102,6 +102,22 @@ export interface Database {
           similarity: number;
         }>;
       };
+      search_knowledge_entries_extractive: {
+        Args: {
+          query_text: string;
+          match_count?: number;
+        };
+        Returns: Array<{
+          id: string;
+          title: string;
+          content: string;
+          category: string | null;
+          tags: string[] | null;
+          text_rank: number;
+          fuzzy_score: number;
+          updated_at: string;
+        }>;
+      };
     };
     Enums: Record<string, never>;
     CompositeTypes: Record<string, never>;

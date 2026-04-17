@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAdminAuthorized } from "@/lib/admin";
-import { generateEmbedding } from "@/lib/embeddings";
 import { getSupabaseAdmin } from "@/lib/db";
 import { Database } from "@/lib/database.types";
 import {
@@ -33,30 +32,15 @@ export async function PUT(
       ...updates,
     };
 
-    if (updates.title || updates.content) {
-      const { data: existingRaw, error: readError } = await supabaseAdmin
+    const updateEntry = () =>
+      supabaseAdmin
         .from("knowledge_entries")
-        .select("title,content")
+        .update(payload)
         .eq("id", params.id)
+        .select("*")
         .single();
 
-      if (readError || !existingRaw) {
-        throw new Error(readError?.message ?? "Entry not found");
-      }
-
-      const existing = existingRaw as { title: string; content: string };
-      const title = updates.title ?? existing.title;
-      const content = updates.content ?? existing.content;
-      payload.embedding = await generateEmbedding(`${title}\n\n${content}`);
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const entriesTable = supabaseAdmin.from("knowledge_entries") as any;
-    let { data, error } = await entriesTable
-      .update(payload)
-      .eq("id", params.id)
-      .select("*")
-      .single();
+    let { data, error } = await updateEntry();
 
     if (error && isMissingSchemaError(error.message)) {
       try {
@@ -71,11 +55,7 @@ export async function PUT(
         );
       }
 
-      const retry = await entriesTable
-        .update(payload)
-        .eq("id", params.id)
-        .select("*")
-        .single();
+      const retry = await updateEntry();
       data = retry.data;
       error = retry.error;
     }
@@ -98,11 +78,10 @@ export async function DELETE(
   }
 
   const supabaseAdmin = getSupabaseAdmin();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const entriesTable = supabaseAdmin.from("knowledge_entries") as any;
-  let { error } = await entriesTable
-    .update({ is_active: false })
-    .eq("id", params.id);
+  const deactivateEntry = () =>
+    supabaseAdmin.from("knowledge_entries").update({ is_active: false }).eq("id", params.id);
+
+  let { error } = await deactivateEntry();
 
   if (error && isMissingSchemaError(error.message)) {
     try {
@@ -117,7 +96,7 @@ export async function DELETE(
       );
     }
 
-    const retry = await entriesTable.update({ is_active: false }).eq("id", params.id);
+    const retry = await deactivateEntry();
     error = retry.error;
   }
 

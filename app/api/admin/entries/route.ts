@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isAdminAuthorized } from "@/lib/admin";
 import { getSupabaseAdmin } from "@/lib/db";
-import { generateEmbedding } from "@/lib/embeddings";
 import {
   ensureSchemaInitialized,
   isMissingSchemaError,
@@ -26,15 +25,18 @@ export async function GET(request: Request) {
   const category = url.searchParams.get("category");
   const supabaseAdmin = getSupabaseAdmin();
 
-  let query = supabaseAdmin
-    .from("knowledge_entries")
-    .select("*")
-    .order("updated_at", { ascending: false });
+  const buildListQuery = () => {
+    let query = supabaseAdmin
+      .from("knowledge_entries")
+      .select("*")
+      .order("updated_at", { ascending: false });
 
-  if (category) query = query.eq("category", category);
-  if (search) query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+    if (category) query = query.eq("category", category);
+    if (search) query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
+    return query.limit(200);
+  };
 
-  const { data, error } = await query.limit(200);
+  const { data, error } = await buildListQuery();
   if (error) {
     if (isMissingSchemaError(error.message)) {
       try {
@@ -49,7 +51,7 @@ export async function GET(request: Request) {
         );
       }
 
-      const retry = await query.limit(200);
+      const retry = await buildListQuery();
       if (retry.error) {
         return NextResponse.json({ error: retry.error.message }, { status: 400 });
       }
@@ -69,18 +71,17 @@ export async function POST(request: Request) {
   try {
     const supabaseAdmin = getSupabaseAdmin();
     const input = entrySchema.parse(await request.json());
-    const embedding = await generateEmbedding(`${input.title}\n\n${input.content}`);
 
-    const insertQuery = supabaseAdmin
-      .from("knowledge_entries")
-      .insert({
-        ...input,
-        embedding,
-      })
-      .select("*")
-      .single();
+    const insertEntry = () =>
+      supabaseAdmin
+        .from("knowledge_entries")
+        .insert({
+          ...input,
+        })
+        .select("*")
+        .single();
 
-    let { data, error } = await insertQuery;
+    let { data, error } = await insertEntry();
 
     if (error && isMissingSchemaError(error.message)) {
       try {
@@ -94,7 +95,7 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      const retry = await insertQuery;
+      const retry = await insertEntry();
       data = retry.data;
       error = retry.error;
     }
