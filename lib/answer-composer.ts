@@ -45,10 +45,27 @@ function clampLength(value: string, maxLength: number) {
   return `${safe.trim()}…`;
 }
 
-function lowercaseFirst(value: string) {
-  if (!value) return value;
-  return `${value.charAt(0).toLowerCase()}${value.slice(1)}`;
-}
+const STOP_WORDS = new Set([
+  "what",
+  "how",
+  "is",
+  "are",
+  "the",
+  "a",
+  "an",
+  "to",
+  "in",
+  "on",
+  "for",
+  "of",
+  "with",
+  "and",
+  "or",
+  "do",
+  "does",
+  "can",
+  "i",
+]);
 
 type DirectAnswerResult = {
   text: string;
@@ -60,7 +77,71 @@ type KeyPoint = {
   candidateId: string;
 };
 
-function composeDirectAnswer(candidates: RetrievalCandidate[]): DirectAnswerResult {
+function tokenize(value: string) {
+  return normalizeKey(value)
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token.length >= 3 && !STOP_WORDS.has(token));
+}
+
+function splitSentences(value: string) {
+  return normalizeSpace(value)
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+}
+
+function termCoverage(text: string, terms: string[]) {
+  if (!terms.length) return 0;
+  const haystack = normalizeKey(text);
+  return terms.reduce((count, term) => count + Number(haystack.includes(term)), 0);
+}
+
+function pickFocusedCandidates(question: string, candidates: RetrievalCandidate[]) {
+  if (!candidates.length) return [];
+
+  const questionTerms = tokenize(question);
+  const top = candidates[0];
+  const topCategory = normalizeKey(top.category ?? "");
+  const topTags = new Set((top.tags ?? []).map((tag) => normalizeKey(tag)));
+  const minCoverage = questionTerms.length >= 3 ? 2 : 1;
+
+  const ranked = candidates.map((candidate) => {
+    const searchable = `${candidate.title} ${candidate.snippet} ${candidate.content.slice(0, 240)}`;
+    const coverage = termCoverage(searchable, questionTerms);
+    const sameCategory =
+      Boolean(topCategory) && normalizeKey(candidate.category ?? "") === topCategory;
+    const sharedTag = (candidate.tags ?? []).some((tag) =>
+      topTags.has(normalizeKey(tag)),
+    );
+    const focusScore =
+      coverage +
+      Number(sameCategory) +
+      Number(sharedTag) +
+      (candidate.id === top.id ? 2 : 0);
+
+    return { candidate, coverage, focusScore };
+  });
+
+  const filtered = ranked
+    .filter((item) => {
+      if (item.candidate.id === top.id) return true;
+      if (item.coverage < minCoverage) return false;
+      return item.candidate.score >= top.score * 0.6;
+    })
+    .sort((left, right) => {
+      if (right.focusScore !== left.focusScore) return right.focusScore - left.focusScore;
+      return right.candidate.score - left.candidate.score;
+    })
+    .slice(0, 3)
+    .map((item) => item.candidate);
+
+  return filtered.some((item) => item.id === top.id) ? filtered : [top, ...filtered].slice(0, 3);
+}
+
+function composeDirectAnswer(
+  question: string,
+  candidates: RetrievalCandidate[],
+): DirectAnswerResult {
   if (!candidates.length) {
     return {
       text: LOW_CONFIDENCE_FALLBACK,
@@ -68,39 +149,27 @@ function composeDirectAnswer(candidates: RetrievalCandidate[]): DirectAnswerResu
     };
   }
 
-  const first = ensureSentence(clampLength(firstSentence(candidates[0].snippet), 220));
-  const secondCandidate = candidates.find(
-    (candidate) =>
-      candidate.id !== candidates[0].id &&
-      normalizeKey(candidate.snippet) !== normalizeKey(candidates[0].snippet),
-  );
-
-  const paragraphOne = first
-    ? `From what I can see in the knowledge base, ${lowercaseFirst(first)}`
-    : LOW_CONFIDENCE_FALLBACK;
-  const usedCandidateIds = [candidates[0].id];
-
-  if (!secondCandidate) {
+  const top = candidates[0];
+  const terms = tokenize(question);
+  const sentences = splitSentences(top.content);
+  if (!sentences.length) {
     return {
-      text: paragraphOne,
-      usedCandidateIds,
+      text: ensureSentence(clampLength(firstSentence(top.snippet), 420)),
+      usedCandidateIds: [top.id],
     };
   }
 
-  const secondSnippet = ensureSentence(
-    clampLength(firstSentence(secondCandidate.snippet), 220),
-  );
-  if (!secondSnippet) {
-    return {
-      text: paragraphOne,
-      usedCandidateIds,
-    };
-  }
-
-  const paragraphTwo = `Also, ${lowercaseFirst(secondSnippet)}`;
+  const rankedSentences = sentences
+    .map((sentence) => ({ sentence, score: termCoverage(sentence, terms) }))
+    .sort((left, right) => right.score - left.score);
+  const selected = rankedSentences
+    .slice(0, 2)
+    .map((item) => ensureSentence(item.sentence))
+    .filter(Boolean);
+  const text = clampLength(selected.join(" "), 420);
   return {
-    text: `${paragraphOne}\n\n${paragraphTwo}`,
-    usedCandidateIds: [...usedCandidateIds, secondCandidate.id],
+    text: text || LOW_CONFIDENCE_FALLBACK,
+    usedCandidateIds: [top.id],
   };
 }
 
@@ -201,7 +270,8 @@ export function composeExtractiveAnswer(
   question: string,
   candidates: RetrievalCandidate[],
 ): ComposedAnswer {
-  const lowConfidence = isLowConfidence(candidates);
+  const focusedCandidates = pickFocusedCandidates(question, candidates);
+  const lowConfidence = isLowConfidence(focusedCandidates);
 
   if (lowConfidence) {
     const relatedTitles = pickRelatedTitles(question, candidates);
@@ -225,15 +295,15 @@ export function composeExtractiveAnswer(
     };
   }
 
-  const directAnswer = composeDirectAnswer(candidates);
-  const keyPoints = composeKeyPoints(candidates);
+  const directAnswer = composeDirectAnswer(question, focusedCandidates);
+  const keyPoints = composeKeyPoints(focusedCandidates);
   const usedCandidateIds = Array.from(
     new Set([
       ...directAnswer.usedCandidateIds,
       ...keyPoints.map((point) => point.candidateId),
     ]),
   );
-  const sources = pickSources(candidates, usedCandidateIds);
+  const sources = pickSources(focusedCandidates, usedCandidateIds);
 
   const sourceLines = sources.length
     ? sources.map((source) => `- ${source.title}${source.category ? ` (${source.category})` : ""}`)

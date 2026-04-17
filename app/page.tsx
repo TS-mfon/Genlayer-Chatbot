@@ -246,7 +246,9 @@ export default function Home() {
               ) : (
                 <p className="whitespace-pre-wrap">{message.content}</p>
               )}
-              {message.sources?.length ? (
+              {message.sources?.length &&
+              message.role === "assistant" &&
+              !message.content.includes("## Sources") ? (
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                   {message.sources.map((source) => (
                     <span
