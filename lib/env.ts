@@ -19,6 +19,9 @@ export const env = {
   get SUPABASE_SERVICE_ROLE_KEY() {
     return requireEnv("SUPABASE_SERVICE_ROLE_KEY");
   },
+  get GEMINI_API_KEY() {
+    return process.env.GEMINI_API_KEY ?? null;
+  },
   get NEXTAUTH_SECRET() {
     return requireEnv("NEXTAUTH_SECRET");
   },

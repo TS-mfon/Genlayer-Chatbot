@@ -7,7 +7,7 @@ export default function AboutPage() {
         from admin-managed knowledge entries stored in the database.
       </p>
       <ul className="list-disc space-y-1 pl-5 text-sm text-slate-300">
-        <li>Answer mode: deterministic extractive (no LLM required)</li>
+        <li>Answer mode: retrieval-grounded with optional Gemini synthesis</li>
         <li>Retrieval: PostgreSQL full-text + fuzzy search ranking</li>
         <li>Admin tools: CRUD management + secured SQL console</li>
       </ul>

@@ -3,6 +3,11 @@ import { z } from "zod";
 import { getSupabaseAdmin } from "@/lib/db";
 import { composeExtractiveAnswer } from "@/lib/answer-composer";
 import { retrieveCandidates } from "@/lib/retrieval";
+import {
+  generateGroundedChatAnswer,
+  isGeminiRateLimitError,
+} from "@/lib/gemini";
+import { env } from "@/lib/env";
 
 const chatInputSchema = z.object({
   question: z.string().min(2),
@@ -17,6 +22,20 @@ export async function POST(request: Request) {
     const payload = chatInputSchema.parse(await request.json());
     const candidates = await retrieveCandidates(payload.question, 12);
     const composed = composeExtractiveAnswer(payload.question, candidates);
+    const sourceIds = new Set(composed.sources.map((source) => source.id));
+    const groundedCandidates = candidates.filter((candidate) => sourceIds.has(candidate.id));
+
+    let finalAnswer = composed.answer;
+    if (!composed.lowConfidence && env.GEMINI_API_KEY && groundedCandidates.length > 0) {
+      try {
+        finalAnswer = await generateGroundedChatAnswer(payload.question, groundedCandidates);
+      } catch (caught) {
+        if (!isGeminiRateLimitError(caught)) {
+          finalAnswer = composed.answer;
+        }
+      }
+    }
+
     const supabaseAdmin = getSupabaseAdmin();
 
     let sessionId = payload.session_id ?? null;
@@ -46,7 +65,7 @@ export async function POST(request: Request) {
         {
           session_id: sessionId,
           role: "assistant",
-          content: composed.answer,
+          content: finalAnswer,
           sources: sourceIds,
         },
       ]);
@@ -64,7 +83,7 @@ export async function POST(request: Request) {
 
     const responsePayload = {
       session_id: sessionId,
-      answer: composed.answer,
+      answer: finalAnswer,
       sources: composed.sources.map((source) => ({
         id: source.id,
         title: source.title,
